@@ -913,6 +913,19 @@ class MySensorsDevice(Device):
                         },
                         values, new_value, new_node_id, new_child_id, new_main_type, new_sub_type)
 
+                if new_sub_type == 40:                     # V_RGB
+                    self._type.append('ColorControl')
+                    self.properties[targetPropertyID] = MySensorsProperty(
+                        self,
+                        targetPropertyID,
+                        {
+                            '@type': 'ColorProperty',
+                            'label': new_description,
+                            'type': 'string',
+                #            'readOnly': False,
+                        },
+                        values, new_value, new_node_id, new_child_id, new_main_type, new_sub_type)
+
             #elif new_main_type == 27:                      # RGB light with separate white level
             #    #self._type.append(['OnOffSwitch', 'Light', 'ColorControl'])
             #    pass #todo

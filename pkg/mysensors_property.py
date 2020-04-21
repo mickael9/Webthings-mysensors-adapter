@@ -82,7 +82,9 @@ class MySensorsProperty(Property):
             
             print("self.subchild_id = " + str(self.subchild_id))
             
-            if is_a_number(value) and self.subchild_id != 47: # 47 is V_TEXT
+            if self.subchild_id == 40: # V_RGB
+                value = str(value).lstrip('#')
+            elif is_a_number(value) and self.subchild_id != 47: # 47 is V_TEXT
                 if self.device.adapter.DEBUG:
                     print("-will be sent as int or float")
                 new_value = get_int_or_float(value)
@@ -94,7 +96,6 @@ class MySensorsProperty(Property):
                 #    new_value = False
                 #if new_value == 1:
                 #    new_value = True                
-                
             else:
                 if self.device.adapter.DEBUG:
                     print("-will be sent as string")
