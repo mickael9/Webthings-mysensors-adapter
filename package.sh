@@ -2,7 +2,7 @@
 
 set -e
 
-version=$(grep version package.json | cut -d: -f2 | cut -d\" -f2)
+version=$(grep version manifest.json | cut -d: -f2 | cut -d\" -f2)
 
 
 # Clean up from previous releases
@@ -21,7 +21,7 @@ pip3 install -r requirements.txt -t lib --no-binary pymysensors,paho-mqtt --pref
 #temporary fix
 #cp VERSION ./lib/mysensors/
 
-cp -r pkg lib LICENSE package.json manifest.json *.py setup.cfg requirements.txt package/
+cp -r pkg lib LICENSE manifest.json *.py setup.cfg requirements.txt package/
 find package -type f -name '*.pyc' -delete
 #find package -type d -empty -delete
 

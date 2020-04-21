@@ -10,84 +10,102 @@
     }
   },
   "homepage_url": "https://github.com/createcandle/Webthings-mysensors-adapter",
-  "id": "mysensors-adapter",
+  "id": "mysensors-adapter-new",
   "license": "MPL-2.0",
   "manifest_version": 1,
-  "name": "MySensors",
+  "name": "MySensors (new)",
   "options": {
     "default": {
-      "Gateway": "USB Serial gateway",
-      "Metric": true,
-      "Optimize things": true,
-      "Timeout period": "60",
-      "USB device name": "",
-      "IP address": "",
-      "MQTT password": "",
-      "MQTT username": "",
-      "MQTT in prefix": "mygateway1-out",
-      "MQTT out prefix": "mygateway1-in",
-      "Debugging": false
+      "gateways": [
+        {
+          "Gateway": "USB Serial gateway",
+          "Metric": true,
+          "Optimize things": true,
+          "Timeout period": "60",
+          "USB device name": "",
+          "IP address": "",
+          "MQTT password": "",
+          "MQTT username": "",
+          "MQTT in prefix": "mygateway1-out",
+          "MQTT out prefix": "mygateway1-in",
+          "Debugging": false
+        }
+      ]
     },
     "schema": {
+      "type": "object",
       "properties": {
-        "Gateway": {
-          "description": "How are you talking to the MySensors network? Via a USB device is most common.",
-          "enum": [
-            "USB Serial gateway",
-            "Ethernet gateway",
-            "MQTT gateway"
-          ],
-          "type": "string"
-        },
-        "Metric": {
-          "description": "Check the box to request metric units from the devices. Uncheck it to request they send data in imperial units instead.",
-          "type": "boolean"
-        },
-        "Optimize things": {
-          "description": "Split up big things into separate smaller things. For example, a device with 4 toggles could become 4 devices with one toggle.",
-          "type": "boolean"
-        },
-        "Timeout period": {
-          "description": "After how many minutes of inactivity should a device be reported as no longer connected? If you set this to 0, devices will always be set to fully available (even if they are not).",
-          "type": "string"
-        },
-        "USB device name": {
-          "description": "If you leave this empty, the add-on will automatically search for a connceted MySensors gateway device. If you want you can manually override this proces by providing a serial port name here. On a Linux device this would be something like '/dev/ttyUSB0'.",
-          "type": "string"
-        },
-        "IP address": {
-          "description": "If you are using an ethernet gateway or MQTT server, what is its IP address? You can try 127.0.0.1 if it's installed on the same computer as the Mozilla WebThings gateway.",
-          "type": "string"
-        },
-        "MQTT password": {
-          "description": "The password for MQTT security.",
-          "type": "string"
-        },
-        "MQTT username": {
-          "description": "The username for MQTT security.",
-          "type": "string"
-        },
-        "MQTT in prefix": {
-          "description": "The topic prefix for incoming messages messages.",
-          "type": "string"
-        },
-        "MQTT out prefix": {
-          "description": "The topic prefix for outgoing messages.",
-          "type": "string"
-        },
-        "Debugging": {
-          "description": "Debugging allows you to diagnose any issues with the add-on. If enabled it will result in a lot more debug data in the internal log (which can be found under settings -> developer -> view internal logs).",
-          "type": "boolean"
+        "gateways": {
+          "type": "array",
+          "title": "Gateways",
+          "items": {
+            "$ref": "#/definitions/gateway"
+          }
         }
       },
-      "required": [
-        "Gateway",
-        "Optimize things",
-        "Metric",
-				"Timeout period",
-        "Debugging"
-      ],
-      "type": "object"
+      "definitions": {
+        "gateway": {
+          "type": "object",
+          "properties": {
+            "Gateway": {
+              "description": "How are you talking to the MySensors network? Via a USB device is most common.",
+              "enum": [
+                "USB Serial gateway",
+                "Ethernet gateway",
+                "MQTT gateway"
+              ],
+              "type": "string"
+            },
+            "Metric": {
+              "description": "Check the box to request metric units from the devices. Uncheck it to request they send data in imperial units instead.",
+              "type": "boolean"
+            },
+            "Optimize things": {
+              "description": "Split up big things into separate smaller things. For example, a device with 4 toggles could become 4 devices with one toggle.",
+              "type": "boolean"
+            },
+            "Timeout period": {
+              "description": "After how many minutes of inactivity should a device be reported as no longer connected? If you set this to 0, devices will always be set to fully available (even if they are not).",
+              "type": "string"
+            },
+            "USB device name": {
+              "description": "If you leave this empty, the add-on will automatically search for a connceted MySensors gateway device. If you want you can manually override this proces by providing a serial port name here. On a Linux device this would be something like '/dev/ttyUSB0'.",
+              "type": "string"
+            },
+            "IP address": {
+              "description": "If you are using an ethernet gateway or MQTT server, what is its IP address? You can try 127.0.0.1 if it's installed on the same computer as the Mozilla WebThings gateway.",
+              "type": "string"
+            },
+            "MQTT password": {
+              "description": "The password for MQTT security.",
+              "type": "string"
+            },
+            "MQTT username": {
+              "description": "The username for MQTT security.",
+              "type": "string"
+            },
+            "MQTT in prefix": {
+              "description": "The topic prefix for incoming messages messages.",
+              "type": "string"
+            },
+            "MQTT out prefix": {
+              "description": "The topic prefix for outgoing messages.",
+              "type": "string"
+            },
+            "Debugging": {
+              "description": "Debugging allows you to diagnose any issues with the add-on. If enabled it will result in a lot more debug data in the internal log (which can be found under settings -> developer -> view internal logs).",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "Gateway",
+            "Optimize things",
+            "Metric",
+            "Timeout period",
+            "Debugging"
+          ]
+        }
+      }
     }
   },
   "short_name": "MySensors",

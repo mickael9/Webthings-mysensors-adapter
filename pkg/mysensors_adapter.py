@@ -9,7 +9,7 @@ sys.path.append(path.join(path.dirname(path.abspath(__file__)), 'lib'))
 import json
 import asyncio
 import logging
-import threading
+import functools
 
 import serial
 import serial.tools.list_ports as prtlst
@@ -24,53 +24,51 @@ from gateway_addon import Adapter, Database
 from .mysensors_device import MySensorsDevice
 from .util import pretty, is_a_number, get_int_or_float
 
-_TIMEOUT = 3
+print = functools.partial(print, flush=True)
 
-__location__ = os.path.realpath(
-    os.path.join(os.getcwd(), os.path.dirname(__file__)))
 
-_CONFIG_PATHS = [
-    os.path.join(os.path.expanduser('~'), '.mozilla-iot', 'config'),
-]
+class ConfigLoader:
+    @staticmethod
+    def load_config(package_name):
+        """Attempt to add all configured devices."""
+        try:
+            database = Database(package_name)
+            if not database.open():
+                return
 
-if 'MOZIOT_HOME' in os.environ:
-    _CONFIG_PATHS.insert(0, os.path.join(os.environ['MOZIOT_HOME'], 'config'))
+            config = database.load_config()
+            # old config supports only one instance, convert it to a list
+            if not 'gateways' in config:
+                config = dict(gateways=[config])
+                database.save_config(config)
+            database.close()
+        except:
+            print("Error! Failed to open settings database.")
+            config = dict(gateways=[])
 
+        if not config.get('gateways', []):
+            config['gateways'] = [{}]
+
+        return config
 
 
 class MySensorsAdapter(Adapter):
     """Adapter for MySensors"""
 
-    def __init__(self, verbose=True):
+    def __init__(self, id, package_name, config, verbose=True, loop=None):
         """
         Initialize the object.
 
         verbose -- whether or not to enable verbose logging
         """
-        print("initialising adapter from class")
+
+        self.loop = loop or asyncio.get_event_loop()
         self.pairing = False
         self.name = self.__class__.__name__
-        Adapter.__init__(self, 'mysensors-adapter', 'mysensors-adapter', verbose=verbose)
-        #print("Adapter ID = " + self.get_id())
 
-        for path in _CONFIG_PATHS:
-            if os.path.isdir(path):
-                self.old_persistence_file_path = os.path.join(
-                    path,
-                    'mysensors-adapter-persistence.json'
-                )
-        self.addon_path = os.path.join(os.path.expanduser('~'), '.mozilla-iot', 'addons', 'mysensors-adapter')
-        self.persistence_file_path = os.path.join(os.path.expanduser('~'), '.mozilla-iot', 'data', 'mysensors-adapter','mysensors-adapter-persistence.json')
-        
-        print("User profile data: " + str(self.user_profile))
-        
-        # Persistence files should move to a new location.
-        try:
-            if os.path.isfile(self.old_persistence_file_path) and ( not os.path.isfile(self.persistence_file_path)):
-                os.system('cp ' + self.old_persistence_file_path + ' ' + self.persistence_file_path)
-        except:
-            print("Error copying old persistence file to new location")
-        
+        super().__init__(id, package_name, verbose=verbose)
+
+        self.persistence_file_path = os.path.join(self.user_profile['dataDir'], package_name, '{}.persistence.json'.format(id))
         self.metric = True
         self.temperature_unit = 'degree celsius'
         self.DEBUG = True
@@ -93,23 +91,30 @@ class MySensorsAdapter(Adapter):
         self.timeout_seconds = 0 # the default is a day
         self.last_seen_timestamps = {}
         self.previous_heartbeats = {}
+        self.rerequest_task = None
+
+
+        print("Adapter ID = " + id)
+        print("User profile data: " + str(self.user_profile))
+        print("Persistence file path: " + self.persistence_file_path)
+
         
         try:
             print("Making initial scan of USB ports")
             self.scan_usb_ports()
         except:
-            print("Error during initial scan of usb ports")
+            raise Exception("Error during initial scan of usb ports")
             
         
         try:
-            self.add_from_config()
+            self.add_from_config(config)
         except Exception as ex:
-            print("Error loading config (and initialising PyMySensors library?): " + str(ex))
+            raise Exception("Error loading config (and initialising PyMySensors library?): " + str(ex))
 
         print("End of MySensors adapter init process")
 
 
-    def clock(self):
+    async def clock(self):
         """ Runs every minute and updates which devices are still connected """
         if self.DEBUG:
             print("clock thread init")
@@ -199,14 +204,11 @@ class MySensorsAdapter(Adapter):
                     minutes_counter = 0
                     self.try_rerequest()
 
-            time.sleep(1)
+            await asyncio.sleep(1)
             seconds_counter += 1
             
         if self.DEBUG:
             print("Clock thread ending")
-
-
-
 
 
     def recreate_from_persistence(self):
@@ -295,165 +297,54 @@ class MySensorsAdapter(Adapter):
             print("End of recreation function")
         return
 
-
-
+    async def start(self):
+        await self.GATEWAY.start_persistence()
+        await self.GATEWAY.start()
 
     def start_pymysensors_gateway(self, selected_gateway_type, dev_port='/dev/ttyUSB0', ip_address='127.0.0.1'):
-        # This is the non-ASynchronous version, which is no longer used:
-        #self.GATEWAY = mysensors.SerialGateway('/dev/ttyUSB0', baud=115200, timeout=1.0, reconnect_timeout=10.0, event_callback=self.event, persistence=False, persistence_file='./mysensors.pickle', protocol_version='2.2')
-        #self.GATEWAY.start_persistence()
-        #self.GATEWAY.start()
-        
-        # This is the new asynchronous version of PyMySensors:
-        #try:
-            #self.LOOP = asyncio.get_event_loop()
-            #self.LOOP.set_debug(True)
-        #except:
-        #    print("Error getting asyncio event loop!")
-        
-        #if self.DEBUG:
-        #    logging.basicConfig(level=logging.DEBUG)
-        #else:
-        #    logging.basicConfig(level=logging.INFO) # TODO try ERROR level?
-        
-        # Establishing a MySensors gateway:
-        try:
-            if selected_gateway_type == 'USB Serial gateway':
-                print("Starting non-async serial")
-                self.GATEWAY = mysensors.SerialGateway(
-                  dev_port, baud=115200, 
-                  #timeout=1.0, 
-                  #reconnect_timeout=10.0,
-                  event_callback=self.mysensors_message, persistence=True,
-                  persistence_file=self.persistence_file_path, protocol_version='2.2')
-                #GATEWAY.start_persistence() # optional, remove this line if you don't need persistence.
-                #GATEWAY.start()
-                
-                #self.GATEWAY = mysensors.SerialGateway(dev_port, baud=115200, timeout=1.0, reconnect_timeout=10.0, event_callback=self.mysensors_message, persistence=True, persistence_file=self.persistence_file_path, protocol_version='2.2')
-                self.GATEWAY.start_persistence()
-                self.GATEWAY.start()
-                print("Beyond starting non-async serial")
-                
-                """
-                try:
-                    self.LOOP = asyncio.get_event_loop()
-                    self.LOOP.set_debug(True)
-                except:
-                    print("Error getting asyncio event loop!")
-                
-                self.GATEWAY = mysensors.AsyncSerialGateway(
-                    dev_port, loop=self.LOOP, event_callback=self.mysensors_message,
-                    persistence=True, persistence_file=self.persistence_file_path, 
-                    protocol_version='2.2')
-                if self.DEBUG:
-                    print("created serial PyMySensors object")
-                
-                try:
-                    self.LOOP.run_until_complete(self.GATEWAY.start_persistence())
-                    self.LOOP.run_until_complete(self.GATEWAY.start())
-                
-                    self.LOOP.run_forever()
-                    if self.DEBUG:
-                        print("Beyond PyMySensors loop start")
-                except:
-                    print("Asyncio loop is not running")
-                """
+        if selected_gateway_type == 'USB Serial gateway':
+            self.GATEWAY = mysensors.AsyncSerialGateway(
+                dev_port, baud=115200, 
+                #timeout=1.0, 
+                #reconnect_timeout=10.0,
+                event_callback=self.mysensors_message, persistence=True,
+                persistence_file=self.persistence_file_path, protocol_version='2.2')
+        elif selected_gateway_type == 'Ethernet gateway':
+            self.GATEWAY = mysensors.AsyncTCPGateway(ip_address, event_callback=self.mysensors_message, 
+                persistence=True, persistence_file=self.persistence_file_path, 
+                protocol_version='2.2')
 
-                
-            elif selected_gateway_type == 'Ethernet gateway':
-                # This is the new asynchronous version of PyMySensors:
-                try:
-                    self.LOOP = asyncio.get_event_loop()
-                    self.LOOP.set_debug(True)
-                    #pass
-                except:
-                    print("Error getting asyncio event loop!")
-                
-                self.GATEWAY = mysensors.AsyncTCPGateway(ip_address, event_callback=self.mysensors_message, 
-                    persistence=True, persistence_file=self.persistence_file_path, 
-                    protocol_version='2.2')
-
-                try:
-                    self.LOOP.run_until_complete(self.GATEWAY.start_persistence())
-                    self.LOOP.run_until_complete(self.GATEWAY.start())
-                
-                    self.LOOP.run_forever()
-                    if self.DEBUG:
-                        print("Beyond PyMySensors loop start")
-                except:
-                    print("Asyncio loop is not running")
-
-
-            elif selected_gateway_type == 'MQTT gateway':
-                print("Starting MQTT version, connecting to port 1883 on IP address " + str(ip_address))
-                
-                try:
-                    self.LOOP = asyncio.get_event_loop()
-                    self.LOOP.set_debug(True)
-                    #pass
-                except:
-                    print("Error getting asyncio event loop!")
-                try:
-                    #print("MQTT Creating object")
-                    self.MQTTC = MQTT(ip_address, 1883, 60)
-                    
-                    #self.MQTTC = mqtt.Client()
-                    #self.MQTTC.connect(ip_address, 1883, 60)
-                    
-                    if self.MQTT_username != '' and self.MQTT_password != '':
-                        self.MQTTC.authenticate(username=self.MQTT_username,password=self.MQTT_password)
-                        print("-set MQTT username and password")
-                    #print("MQTT will start")
-                    self.MQTTC.loop_start()
-                except Exception as ex:
-                    print("MQTT object error: " + str(ex))
-                    
-                
-                #self.GATEWAY = mysensors.AsyncMQTTGateway(ip_address, event_callback=self.mysensors_message, 
-                #    persistence=True, persistence_file=self.persistence_file_path, 
-                #    protocol_version='2.2')
-                
-                try:
-                    self.GATEWAY = mysensors.AsyncMQTTGateway(self.MQTTC.publish, self.MQTTC.subscribe, in_prefix=self.MQTT_in_Prefix,
-                        out_prefix=self.MQTT_out_prefix, retain=True, event_callback=self.mysensors_message,
-                        persistence=True, persistence_file=self.persistence_file_path, 
-                        protocol_version='2.2')
-                except Exception as ex:
-                    print("AsyncMQTTGateway object error: " + str(ex))
-                
-                try:
-                    self.LOOP.run_until_complete(self.GATEWAY.start_persistence())
-                    self.LOOP.run_until_complete(self.GATEWAY.start())
-                
-                    self.LOOP.run_forever()
-                    if self.DEBUG:
-                        print("Beyond PyMySensors loop start")
-                except:
-                    print("Asyncio loop is not running")
+        elif selected_gateway_type == 'MQTT gateway':
+            print("Starting MQTT version, connecting to port 1883 on IP address " + str(ip_address))
             
+            #print("MQTT Creating object")
+            self.MQTTC = MQTT(ip_address, 1883, 60)
             
-        except Exception as ex:  # pylint: disable=broad-except
-            print("ERROR! Unable to initialise the PyMySensors object. Details: " + str(ex))    
+            #self.MQTTC = mqtt.Client()
+            #self.MQTTC.connect(ip_address, 1883, 60)
+            
+            if self.MQTT_username != '' and self.MQTT_password != '':
+                self.MQTTC.authenticate(username=self.MQTT_username,password=self.MQTT_password)
+                print("-set MQTT username and password")
+            #print("MQTT will start")
+            self.MQTTC.loop_start()
 
+            self.GATEWAY = mysensors.AsyncMQTTGateway(self.MQTTC.publish, self.MQTTC.subscribe, in_prefix=self.MQTT_in_Prefix,
+                out_prefix=self.MQTT_out_prefix, retain=True, event_callback=self.mysensors_message,
+                persistence=True, persistence_file=self.persistence_file_path, 
+                protocol_version='2.2')
+
+        self.loop.create_task(self.start())
 
     def unload(self):
         print("Shutting down MySensors adapter")
         
         try:
             self.running = False
-            self.GATEWAY.stop()
+            self.loop.create_task(self.GATEWAY.stop())
             print("PyMysensors Gateway.stop() called")
         except:
             print("MySensors adapter was unable to cleanly close PyMySensors object. This is not a problem.")
-            
-        try:
-            for task in asyncio.Task.all_tasks():
-                task.cancel()
-            self.LOOP.stop()
-            self.LOOP.close()
-            print("Loop stopped/closed")
-        except:
-            print("MySensors adapter was unable to cleanly close PyMySensors loop. This is not a problem.")
 
 
     def remove_thing(self, device_id):
@@ -727,33 +618,15 @@ class MySensorsAdapter(Adapter):
 
 
     def try_rerequest(self):
-        # re-request that all nodes present themselves, but only is that thread isn't already running / doesn't already exist.
-        try:
-            if self.t:
-                if self.DEBUG:
-                    print("Rerequest thread already existed")
-                if not self.t.is_alive():
-                    # Restarting request for presentation of nodes
-                    self.t = threading.Thread(target=self.rerequest)
-                    self.t.daemon = True
-                    self.t.start()
-                    if self.DEBUG:
-                        print("Re-request of node presentation restarted")
-                else:
-                    if self.DEBUG:
-                        print("Already busy re-requesting nodes.")
-        except:
-            try:
-                self.t = threading.Thread(target=self.rerequest)
-                self.t.daemon = True
-                self.t.start()
-                if self.DEBUG:
-                    print("Re-request thread created")
-            except:
-                print("Could not create thread")
+        if self.rerequest_task is None or self.rerequest_task.done():
+            self.rerequest_task = self.loop.create_task(self.rerequest())
+            if self.DEBUG:
+                print("Re-request of node presentation restarted")
+        else:
+            if self.DEBUG:
+                print("Rerequest thread already existed")
 
-
-    def rerequest(self):   
+    async def rerequest(self):
         if self.DEBUG:
             print("Re-requesting presentation of all nodes on the network")
         
@@ -763,7 +636,7 @@ class MySensorsAdapter(Adapter):
             if self.DEBUG:
                 print("Sending discovery request")
             self.GATEWAY.send('0;255;3;0;26;0\n') # Ask all nodes within earshot to respond with their node ID's.
-            sleep(3)
+            asyncio.sleep(3)
             # this asks all known devices to re-present themselves. In a future version this request could only be made to nodes where a device property count is lower than expected.
             if self.DEBUG:
                 print("Starting looping over all known nodes in self.GATEWAY.sensors")
@@ -772,7 +645,7 @@ class MySensorsAdapter(Adapter):
                     print("<< Requesting presentation from " + str(index))
                 discover_encoded_message = str(index) + ';255;3;0;19;\n'
                 self.GATEWAY.send(discover_encoded_message)
-                sleep(1.11)
+                asyncio.sleep(1.11)
         except Exception as ex:
             print("error while re-requesting presentation of all devices: " + str(ex))
                 
@@ -781,26 +654,7 @@ class MySensorsAdapter(Adapter):
             #sleep(10800) # Every three hours ask all devices to call back in.
             #print("Just woke up after 3 hour nap, ")
 
-
-
-    def add_from_config(self):
-        """Attempt to add all configured devices."""
-        try:
-            database = Database('mysensors-adapter')
-            if not database.open():
-                return
-
-            config = database.load_config()
-            database.close()
-        except:
-            print("Error! Failed to open settings database.")
-
-        if not config:
-            print("Error loading config from database")
-            return
-        
-        
-        
+    def add_from_config(self, config):
         # Debug
         try:
             if 'Debugging' in config:
@@ -824,12 +678,8 @@ class MySensorsAdapter(Adapter):
                 if self.timeout_seconds != 0:
                     if self.DEBUG:
                         print("Starting the internal clock")
-                    try:
-                        t = threading.Thread(target=self.clock)
-                        t.daemon = True
-                        t.start()
-                    except:
-                        print("Error starting the clock thread")
+
+                    self.loop.create_task(self.clock())
                 else:
                     print("-Timeout period was set to 0, so will not check for timeouts.")    
                 

@@ -6,25 +6,32 @@ import gateway_addon
 import signal
 import sys
 import time
+import asyncio
+import json
+import tracemalloc
 
-sys.path.append(path.join(path.dirname(path.abspath(__file__)), 'lib'))
+tracemalloc.start()
 
-from pkg.mysensors_adapter import MySensorsAdapter  # noqa
 
+DIRNAME = path.dirname(path.abspath(__file__))
+
+sys.path.append(path.join(DIRNAME, 'lib'))
+
+from pkg.mysensors_adapter import MySensorsAdapter, ConfigLoader
 
 _API_VERSION = {
     'min': 2,
     'max': 2,
 }
-_ADAPTER = None
+_ADAPTERS = []
 
 print = functools.partial(print, flush=True)
 
 
 def cleanup(signum, frame):
     """Clean up any resources before exiting."""
-    if _ADAPTER is not None:
-        _ADAPTER.close_proxy()
+    for adapter in _ADAPTERS:
+        adapter.close_proxy()
 
     sys.exit(0)
 
@@ -35,11 +42,17 @@ if __name__ == '__main__':
         print('Unsupported API version.')
         sys.exit(0)
 
+    loop = asyncio.get_event_loop()
+
     signal.signal(signal.SIGINT, cleanup)
     signal.signal(signal.SIGTERM, cleanup)
-    _ADAPTER = MySensorsAdapter(verbose=False)
 
-    # Wait until the proxy stops running, indicating that the gateway shut us
-    # down.
-    while _ADAPTER.proxy_running():
-        time.sleep(2)
+    package_name = json.load(open(path.join(DIRNAME, 'manifest.json'), 'r'))['id']
+    loader = ConfigLoader()
+    config = loader.load_config(package_name)
+
+    for i, config in enumerate(config.get('gateways', [])):
+        instance_id = package_name + '-' + str(i)
+        _ADAPTERS.append(MySensorsAdapter(instance_id, package_name, config, verbose=False))
+
+    loop.run_forever()
